@@ -656,6 +656,25 @@ func (f *File) NewSections(names ...string) (err error) {
 	return nil
 }
 
+// RenameSection allows for renaming of existing sections.
+// If section to rename is not found, a new section is instead returned.
+func (f *File) RenameSection(name, newname string) (*Section, error) {
+	var ns *Section // New section
+	if name != newname {
+		s, err := f.GetSection(name)
+		if err != nil {
+			ns, _ = f.NewSection(name)
+			return ns, errors.New("Name not found. New section created.")
+		}
+		ns, _ = f.NewSection(newname)
+		for _, v := range s.Keys() {
+			ns.NewKey(v.name, v.value)
+		}
+		f.DeleteSection(name)
+	}
+	return ns, nil
+}
+
 // GetSection returns section by given name.
 func (f *File) GetSection(name string) (*Section, error) {
 	if len(name) == 0 {
