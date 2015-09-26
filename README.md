@@ -1,6 +1,8 @@
 ini [![Build Status](https://drone.io/github.com/go-ini/ini/status.png)](https://drone.io/github.com/go-ini/ini/latest) [![](http://gocover.io/_badge/github.com/go-ini/ini)](http://gocover.io/github.com/go-ini/ini)
 ===
 
+![](https://avatars0.githubusercontent.com/u/10216035?v=3&s=200)
+
 Package ini provides INI file read and write functionality in Go.
 
 [简体中文](README_ZH.md)
@@ -102,8 +104,8 @@ err := cfg.Section("").NewKey("name", "value")
 To get a list of keys or key names:
 
 ```go
-keys := cfg.Section().Keys()
-names := cfg.Section().KeyStrings()
+keys := cfg.Section("").Keys()
+names := cfg.Section("").KeyStrings()
 ```
 
 To get a clone hash of keys and corresponding values:
@@ -144,7 +146,7 @@ v = cfg.Section("").Key("TIME").MustTime() // RFC3339
 // when key not found or fail to parse value to given type.
 // Except method MustString, which you have to pass a default value.
 
-v = cfg.Seciont("").Key("String").MustString("default")
+v = cfg.Section("").Key("String").MustString("default")
 v = cfg.Section("").Key("BOOL").MustBool(true)
 v = cfg.Section("").Key("FLOAT64").MustFloat64(1.25)
 v = cfg.Section("").Key("INT").MustInt(10)
@@ -172,6 +174,32 @@ cfg.Section("advance").Key("ADDRESS").String()
 NotFound, State, 5000
 Earth
 ------  end  --- */
+```
+
+That's cool, how about continuation lines?
+
+```ini
+[advance]
+two_lines = how about \
+	continuation lines?
+lots_of_lines = 1 \
+	2 \
+	3 \
+	4
+```
+
+Piece of cake!
+
+```go
+cfg.Section("advance").Key("two_lines").String() // how about continuation lines?
+cfg.Section("advance").Key("lots_of_lines").String() // 1 2 3 4 
+```
+
+Note that single quotes around values will be stripped:
+
+```ini
+foo = "some value" // foo: some value
+bar = 'some value' // bar: some value
 ```
 
 That's all? Hmm, no.
@@ -209,6 +237,26 @@ vals = cfg.Section("").Key("FLOAT64S").Float64s(",")
 vals = cfg.Section("").Key("INTS").Ints(",")
 vals = cfg.Section("").Key("INT64S").Int64s(",")
 vals = cfg.Section("").Key("TIMES").Times(",")
+```
+
+### Save your configuration
+
+Finally, it's time to save your configuration to somewhere.
+
+A typical way to save configuration is writing it to a file:
+
+```go
+// ...
+err = cfg.SaveTo("my.ini")
+err = cfg.SaveToIndent("my.ini", "\t")
+```
+
+Another way to save is writing to a `io.Writer` interface:
+
+```go
+// ...
+cfg.WriteTo(writer)
+cfg.WriteToIndent(writer, "\t")
 ```
 
 ## Advanced Usage
@@ -327,9 +375,58 @@ p := &Person{
 // ...
 ```
 
+It's really cool, but what's the point if you can't give me my file back from struct?
+
+### Reflect From Struct
+
+Why not?
+
+```go
+type Embeded struct {
+	Dates  []time.Time `delim:"|"`
+	Places []string
+	None   []int
+}
+
+type Author struct {
+	Name      string `ini:"NAME"`
+	Male      bool
+	Age       int
+	GPA       float64
+	NeverMind string `ini:"-"`
+	*Embeded
+}
+
+func main() {
+	a := &Author{"Unknwon", true, 21, 2.8, "",
+		&Embeded{
+			[]time.Time{time.Now(), time.Now()},
+			[]string{"HangZhou", "Boston"},
+			[]int{},
+		}}
+	cfg := ini.Empty()
+	err = ini.ReflectFrom(cfg, a)
+	// ...
+}
+```
+
+So, what do I get?
+
+```ini
+NAME = Unknwon
+Male = true
+Age = 21
+GPA = 2.8
+
+[Embeded]
+Dates = 2015-08-07T22:14:22+08:00|2015-08-07T22:14:22+08:00
+Places = HangZhou,Boston
+None = 
+```
+
 #### Name Mapper
 
-To save your time and make your code cleaner, this library supports [`NameMapper`](https://gowalker.org/gopkg.in/ini.v1#NameMapper) between struct field and actual secion and key name.
+To save your time and make your code cleaner, this library supports [`NameMapper`](https://gowalker.org/gopkg.in/ini.v1#NameMapper) between struct field and actual section and key name.
 
 There are 2 built-in name mappers:
 
@@ -339,7 +436,7 @@ There are 2 built-in name mappers:
 To use them:
 
 ```go
-type Info struct{
+type Info struct {
 	PackageName string
 }
 
@@ -347,13 +444,75 @@ func main() {
 	err = ini.MapToWithMapper(&Info{}, ini.TitleUnderscore, []byte("packag_name=ini"))
 	// ...
 
-	cfg, err := ini.Load("PACKAGE_NAME=ini")
+	cfg, err := ini.Load([]byte("PACKAGE_NAME=ini"))
 	// ...
 	info := new(Info)
 	cfg.NameMapper = ini.AllCapsUnderscore
 	err = cfg.MapTo(info)
 	// ...
 }
+```
+
+Same rules of name mapper apply to `ini.ReflectFromWithMapper` function.
+
+#### Other Notes On Map/Reflect
+
+Any embedded struct is treated as a section by default, and there is no automatic parent-child relations in map/reflect feature:
+
+```go
+type Child struct {
+	Age string
+}
+
+type Parent struct {
+	Name string
+	Child
+}
+
+type Config struct {
+	City string
+	Parent
+}
+```
+
+Example configuration:
+
+```ini
+City = Boston
+
+[Parent]
+Name = Unknwon
+
+[Child]
+Age = 21
+```
+
+What if, yes, I'm paranoid, I want embedded struct to be in the same section. Well, all roads lead to Rome.
+
+```go
+type Child struct {
+	Age string
+}
+
+type Parent struct {
+	Name string
+	Child `ini:"Parent"`
+}
+
+type Config struct {
+	City string
+	Parent
+}
+```
+
+Example configuration:
+
+```ini
+City = Boston
+
+[Parent]
+Name = Unknwon
+Age = 21
 ```
 
 ## Getting Help

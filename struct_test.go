@@ -39,6 +39,7 @@ type testStruct struct {
 	Male         bool
 	Money        float64
 	Born         time.Time
+	Time         time.Duration `ini:"Duration"`
 	Others       testNested
 	*testEmbeded `ini:"grade"`
 	Unused       int `ini:"-"`
@@ -50,6 +51,7 @@ Age = 21
 Male = true
 Money = 1.25
 Born = 1993-10-07T20:17:05Z
+Duration = 2h45m
 
 [Others]
 Cities = HangZhou|Boston
@@ -58,6 +60,10 @@ Note = Hello world!
 
 [grade]
 GPA = 2.8
+
+[foo.bar]
+Here = there
+When = then
 `
 
 type unsupport struct {
@@ -87,6 +93,10 @@ type defaultValue struct {
 	Cities []string
 }
 
+type fooBar struct {
+	Here, When string
+}
+
 const _INVALID_DATA_CONF_STRUCT = `
 Name = 
 Age = age
@@ -97,67 +107,112 @@ Cities =
 `
 
 func Test_Struct(t *testing.T) {
-	Convey("Map file to struct", t, func() {
-		ts := new(testStruct)
-		So(MapTo(ts, []byte(_CONF_DATA_STRUCT)), ShouldBeNil)
+	Convey("Map to struct", t, func() {
+		Convey("Map file to struct", func() {
+			ts := new(testStruct)
+			So(MapTo(ts, []byte(_CONF_DATA_STRUCT)), ShouldBeNil)
 
-		So(ts.Name, ShouldEqual, "Unknwon")
-		So(ts.Age, ShouldEqual, 21)
-		So(ts.Male, ShouldBeTrue)
-		So(ts.Money, ShouldEqual, 1.25)
+			So(ts.Name, ShouldEqual, "Unknwon")
+			So(ts.Age, ShouldEqual, 21)
+			So(ts.Male, ShouldBeTrue)
+			So(ts.Money, ShouldEqual, 1.25)
 
-		t, err := time.Parse(time.RFC3339, "1993-10-07T20:17:05Z")
-		So(err, ShouldBeNil)
-		So(ts.Born.String(), ShouldEqual, t.String())
+			t, err := time.Parse(time.RFC3339, "1993-10-07T20:17:05Z")
+			So(err, ShouldBeNil)
+			So(ts.Born.String(), ShouldEqual, t.String())
 
-		So(strings.Join(ts.Others.Cities, ","), ShouldEqual, "HangZhou,Boston")
-		So(ts.Others.Visits[0].String(), ShouldEqual, t.String())
-		So(ts.Others.Note, ShouldEqual, "Hello world!")
-		So(ts.testEmbeded.GPA, ShouldEqual, 2.8)
-	})
+			dur, err := time.ParseDuration("2h45m")
+			So(err, ShouldBeNil)
+			So(ts.Time.Seconds(), ShouldEqual, dur.Seconds())
 
-	Convey("Map to non-pointer struct", t, func() {
-		cfg, err := Load([]byte(_CONF_DATA_STRUCT))
-		So(err, ShouldBeNil)
-		So(cfg, ShouldNotBeNil)
+			So(strings.Join(ts.Others.Cities, ","), ShouldEqual, "HangZhou,Boston")
+			So(ts.Others.Visits[0].String(), ShouldEqual, t.String())
+			So(ts.Others.Note, ShouldEqual, "Hello world!")
+			So(ts.testEmbeded.GPA, ShouldEqual, 2.8)
+		})
 
-		So(cfg.MapTo(testStruct{}), ShouldNotBeNil)
-	})
+		Convey("Map section to struct", func() {
+			foobar := new(fooBar)
+			f, err := Load([]byte(_CONF_DATA_STRUCT))
+			So(err, ShouldBeNil)
 
-	Convey("Map to unsupported type", t, func() {
-		cfg, err := Load([]byte(_CONF_DATA_STRUCT))
-		So(err, ShouldBeNil)
-		So(cfg, ShouldNotBeNil)
+			So(f.Section("foo.bar").MapTo(foobar), ShouldBeNil)
+			So(foobar.Here, ShouldEqual, "there")
+			So(foobar.When, ShouldEqual, "then")
+		})
 
-		cfg.NameMapper = func(raw string) string {
-			if raw == "Byte" {
-				return "NAME"
+		Convey("Map to non-pointer struct", func() {
+			cfg, err := Load([]byte(_CONF_DATA_STRUCT))
+			So(err, ShouldBeNil)
+			So(cfg, ShouldNotBeNil)
+
+			So(cfg.MapTo(testStruct{}), ShouldNotBeNil)
+		})
+
+		Convey("Map to unsupported type", func() {
+			cfg, err := Load([]byte(_CONF_DATA_STRUCT))
+			So(err, ShouldBeNil)
+			So(cfg, ShouldNotBeNil)
+
+			cfg.NameMapper = func(raw string) string {
+				if raw == "Byte" {
+					return "NAME"
+				}
+				return raw
 			}
-			return raw
+			So(cfg.MapTo(&unsupport{}), ShouldNotBeNil)
+			So(cfg.MapTo(&unsupport2{}), ShouldNotBeNil)
+			So(cfg.MapTo(&unsupport4{}), ShouldNotBeNil)
+		})
+
+		Convey("Map from invalid data source", func() {
+			So(MapTo(&testStruct{}, "hi"), ShouldNotBeNil)
+		})
+
+		Convey("Map to wrong types and gain default values", func() {
+			cfg, err := Load([]byte(_INVALID_DATA_CONF_STRUCT))
+			So(err, ShouldBeNil)
+
+			t, err := time.Parse(time.RFC3339, "1993-10-07T20:17:05Z")
+			So(err, ShouldBeNil)
+			dv := &defaultValue{"Joe", 10, true, 1.25, t, []string{"HangZhou", "Boston"}}
+			So(cfg.MapTo(dv), ShouldBeNil)
+			So(dv.Name, ShouldEqual, "Joe")
+			So(dv.Age, ShouldEqual, 10)
+			So(dv.Male, ShouldBeTrue)
+			So(dv.Money, ShouldEqual, 1.25)
+			So(dv.Born.String(), ShouldEqual, t.String())
+			So(strings.Join(dv.Cities, ","), ShouldEqual, "HangZhou,Boston")
+		})
+	})
+
+	Convey("Reflect from struct", t, func() {
+		type Embeded struct {
+			Dates  []time.Time `delim:"|"`
+			Places []string
+			None   []int
 		}
-		So(cfg.MapTo(&unsupport{}), ShouldNotBeNil)
-		So(cfg.MapTo(&unsupport2{}), ShouldNotBeNil)
-		So(cfg.MapTo(&unsupport4{}), ShouldNotBeNil)
-	})
+		type Author struct {
+			Name      string `ini:"NAME"`
+			Male      bool
+			Age       int
+			GPA       float64
+			NeverMind string `ini:"-"`
+			*Embeded  `ini:"infos"`
+		}
+		a := &Author{"Unknwon", true, 21, 2.8, "",
+			&Embeded{
+				[]time.Time{time.Now(), time.Now()},
+				[]string{"HangZhou", "Boston"},
+				[]int{},
+			}}
+		cfg := Empty()
+		So(ReflectFrom(cfg, a), ShouldBeNil)
+		cfg.SaveTo("testdata/conf_reflect.ini")
 
-	Convey("Map from invalid data source", t, func() {
-		So(MapTo(&testStruct{}, "hi"), ShouldNotBeNil)
-	})
-
-	Convey("Map to wrong types and gain default values", t, func() {
-		cfg, err := Load([]byte(_INVALID_DATA_CONF_STRUCT))
-		So(err, ShouldBeNil)
-
-		t, err := time.Parse(time.RFC3339, "1993-10-07T20:17:05Z")
-		So(err, ShouldBeNil)
-		dv := &defaultValue{"Joe", 10, true, 1.25, t, []string{"HangZhou", "Boston"}}
-		So(cfg.MapTo(dv), ShouldBeNil)
-		So(dv.Name, ShouldEqual, "Joe")
-		So(dv.Age, ShouldEqual, 10)
-		So(dv.Male, ShouldBeTrue)
-		So(dv.Money, ShouldEqual, 1.25)
-		So(dv.Born.String(), ShouldEqual, t.String())
-		So(strings.Join(dv.Cities, ","), ShouldEqual, "HangZhou,Boston")
+		Convey("Reflect from non-point struct", func() {
+			So(ReflectFrom(cfg, Author{}), ShouldNotBeNil)
+		})
 	})
 }
 

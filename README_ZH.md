@@ -97,8 +97,8 @@ err := cfg.Section("").NewKey("name", "value")
 获取分区下的所有键或键名：
 
 ```go
-keys := cfg.Section().Keys()
-names := cfg.Section().KeyStrings()
+keys := cfg.Section("").Keys()
+names := cfg.Section("").KeyStrings()
 ```
 
 获取分区下的所有键值对的克隆：
@@ -169,6 +169,32 @@ Earth
 ------  end  --- */
 ```
 
+赞爆了！那要是我属于一行的内容写不下想要写到第二行怎么办？
+
+```ini
+[advance]
+two_lines = how about \
+	continuation lines?
+lots_of_lines = 1 \
+	2 \
+	3 \
+	4
+```
+
+简直是小菜一碟！
+
+```go
+cfg.Section("advance").Key("two_lines").String() // how about continuation lines?
+cfg.Section("advance").Key("lots_of_lines").String() // 1 2 3 4 
+```
+
+需要注意的是，值两侧的单引号会被自动剔除：
+
+```ini
+foo = "some value" // foo: some value
+bar = 'some value' // bar: some value
+```
+
 这就是全部了？哈哈，当然不是。
 
 #### 操作键值的辅助方法
@@ -204,6 +230,26 @@ vals = cfg.Section("").Key("FLOAT64S").Float64s(",")
 vals = cfg.Section("").Key("INTS").Ints(",")
 vals = cfg.Section("").Key("INT64S").Int64s(",")
 vals = cfg.Section("").Key("TIMES").Times(",")
+```
+
+### 保存配置
+
+终于到了这个时刻，是时候保存一下配置了。
+
+比较原始的做法是输出配置到某个文件：
+
+```go
+// ...
+err = cfg.SaveTo("my.ini")
+err = cfg.SaveToIndent("my.ini", "\t")
+```
+
+另一个比较高级的做法是写入到任何实现 `io.Writer` 接口的对象中：
+
+```go
+// ...
+cfg.WriteTo(writer)
+cfg.WriteToIndent(writer, "\t")
 ```
 
 ### 高级用法
@@ -320,6 +366,55 @@ p := &Person{
 // ...
 ```
 
+这样玩 INI 真的好酷啊！然而，如果不能还给我原来的配置文件，有什么卵用？
+
+### 从结构反射
+
+可是，我有说不能吗？
+
+```go
+type Embeded struct {
+	Dates  []time.Time `delim:"|"`
+	Places []string
+	None   []int
+}
+
+type Author struct {
+	Name      string `ini:"NAME"`
+	Male      bool
+	Age       int
+	GPA       float64
+	NeverMind string `ini:"-"`
+	*Embeded
+}
+
+func main() {
+	a := &Author{"Unknwon", true, 21, 2.8, "",
+		&Embeded{
+			[]time.Time{time.Now(), time.Now()},
+			[]string{"HangZhou", "Boston"},
+			[]int{},
+		}}
+	cfg := ini.Empty()
+	err = ini.ReflectFrom(cfg, a)
+	// ...
+}
+```
+
+瞧瞧，奇迹发生了。
+
+```ini
+NAME = Unknwon
+Male = true
+Age = 21
+GPA = 2.8
+
+[Embeded]
+Dates = 2015-08-07T22:14:22+08:00|2015-08-07T22:14:22+08:00
+Places = HangZhou,Boston
+None = 
+```
+
 #### 名称映射器（Name Mapper）
 
 为了节省您的时间并简化代码，本库支持类型为 [`NameMapper`](https://gowalker.org/gopkg.in/ini.v1#NameMapper) 的名称映射器，该映射器负责结构字段名与分区名和键名之间的映射。
@@ -340,13 +435,75 @@ func main() {
 	err = ini.MapToWithMapper(&Info{}, ini.TitleUnderscore, []byte("packag_name=ini"))
 	// ...
 
-	cfg, err := ini.Load("PACKAGE_NAME=ini")
+	cfg, err := ini.Load([]byte("PACKAGE_NAME=ini"))
 	// ...
 	info := new(Info)
 	cfg.NameMapper = ini.AllCapsUnderscore
 	err = cfg.MapTo(info)
 	// ...
 }
+```
+
+使用函数 `ini.ReflectFromWithMapper` 时也可应用相同的规则。
+
+#### 映射/反射的其它说明
+
+任何嵌入的结构都会被默认认作一个不同的分区，并且不会自动产生所谓的父子分区关联：
+
+```go
+type Child struct {
+	Age string
+}
+
+type Parent struct {
+	Name string
+	Child
+}
+
+type Config struct {
+	City string
+	Parent
+}
+```
+
+示例配置文件：
+
+```ini
+City = Boston
+
+[Parent]
+Name = Unknwon
+
+[Child]
+Age = 21
+```
+
+很好，但是，我就是要嵌入结构也在同一个分区。好吧，你爹是李刚！
+
+```go
+type Child struct {
+	Age string
+}
+
+type Parent struct {
+	Name string
+	Child `ini:"Parent"`
+}
+
+type Config struct {
+	City string
+	Parent
+}
+```
+
+示例配置文件：
+
+```ini
+City = Boston
+
+[Parent]
+Name = Unknwon
+Age = 21
 ```
 
 ## 获取帮助
