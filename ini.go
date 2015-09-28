@@ -1120,7 +1120,6 @@ func (f *File) SaveToIndent(filename, indent string) error {
 
 // SaveTo writes content to file system.
 func (f *File) SaveTo(filename string) error {
-	fmt.Println("Saving file!")
 	// If file already exists, do a safer save instead of os.Create!
 	if _, err := os.Stat(filename); err == nil {
 		newfn := fmt.Sprintf("%s.new", filename)
