@@ -1120,5 +1120,28 @@ func (f *File) SaveToIndent(filename, indent string) error {
 
 // SaveTo writes content to file system.
 func (f *File) SaveTo(filename string) error {
-	return f.SaveToIndent(filename, "")
+	fmt.Println("Saving file!")
+	// If file already exists, do a safer save instead of os.Create!
+	if _, err := os.Stat(filename); err == nil {
+		newfn := fmt.Sprintf("%s.new", filename)
+		// Because we are truncating with os.Create, if there is already
+		// a previus version of this file, we save with another `temporary` name
+		// before dropping previous version, just so we could be sure we do not
+		// lose data in the process of overwriting original, which can happen on
+		// COW filesystems where writing over a file actually means allocating
+		// new blocks is necessary.
+		if err := f.SaveToIndent(newfn, ""); err != nil {
+			return err
+		}
+		// If we fail to rename, presumably we should still have our old file
+		// and our updated file with a .ini.new extension.
+		if err := os.Rename(newfn, filename); err != nil {
+			return err
+		}
+	} else { // If file does not exist already, we will create it.
+		if err := f.SaveToIndent(filename, ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }
